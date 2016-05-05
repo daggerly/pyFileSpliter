@@ -43,24 +43,24 @@ def create_file(src_f, dst_nm, n, chunk_sz, remainder_sz):
 
 def splitfile(src, dst, mem_sz=MEM_SZ, output_sz=OUTPUT_SZ, safe=True):
     if not exists(src):
-        raise Exception("Error: " + DONT_EXIST_ERROR)
+        raise Exception(DONT_EXIST_ERROR)
     elif not isfile(src):
-        raise Exception("Error: source is not a file.")
+        raise Exception("Source is not a file.")
 
     try:
         mem_sz = parse_chunk_sz(mem_sz)
     except:
-        raise Exception('Error: '+ MEM_FORMAT_ERROR)
+        raise Exception(MEM_FORMAT_ERROR)
     mem_sz -= 1024*1024*150
     if mem_sz<=0:
-        raise Exception('Error: ' + MEM_SIZE_ERROR)
+        raise Exception(MEM_SIZE_ERROR)
 
     try:
         output_sz = parse_chunk_sz(output_sz)
     except:
-        raise Exception("Error: Output files' size must starts with integers, then either M(B) or G(B).")
+        raise Exception("Output files' size must starts with integers, then either M(B) or G(B).")
     if output_sz<=0:
-        raise Exception('Error: output size must be larger than 1MB.')
+        raise Exception('Output size must be larger than 1MB.')
 
     if mem_sz >= output_sz:
         mem_sz = output_sz
@@ -88,6 +88,30 @@ def splitfile(src, dst, mem_sz=MEM_SZ, output_sz=OUTPUT_SZ, safe=True):
             file_name += 1
 
 
+def combinefile(src, dst, mem_sz=MEM_SZ, safe=True):
+    if not exists(src):
+        raise Exception(DONT_EXIST_ERROR)
+    elif not isdir(src):
+        raise Exception("Source is not a directory.")
+
+    from os import listdir
+    files = listdir(src)
+    try:
+        digit_fnames = set((int(i) for i in files))
+        for i in range(1, max(digit_fnames)+1): 
+            print i
+    except:
+        raise Exception("file names in source directory aren't all integers")
+
+    try:
+        mem_sz = parse_chunk_sz(mem_sz)
+    except:
+        raise Exception(MEM_FORMAT_ERROR)
+    mem_sz -= 1024*1024*150
+    if mem_sz<=0:
+        raise Exception(MEM_SIZE_ERROR)
+
+    check_dst(dst, safe)
 
 if __name__ == '__main__':
     import optparse
@@ -113,13 +137,20 @@ if __name__ == '__main__':
     if len(file_and_dir)!=2 :
         parser.error('There should be one file and one directory name, {0} given.'.format(len(file_and_dir)))
     src, dst = file_and_dir
-
     if not exists(src):
         parser.error(DONT_EXIST_ERROR)
     elif isdir(src):
-        if opts.output_sz:
+        if opts.output_size:
             parser.error("You may not specify the OUTPUT_SIZE option to combine files")
-        file_type = 'directory'
+        try:
+            combinefile(
+                          src,
+                          dst,
+                          mem_sz=opts.memery_size,
+                          safe=opts.safe
+            )
+        except Exception as e:
+            parser.error(e.message)
     elif isfile(src):
         try:
             splitfile(
