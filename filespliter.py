@@ -1,7 +1,8 @@
 # coding:utf-8
 
-from sys import exit
-from os.path import isfile, isdir, exists
+from sys import stdout, exit
+from os.path import isfile, isdir, exists, join, getsize
+from math import ceil
 
 MEM_SZ = '2g'
 OUTPUT_SZ = '2g'
@@ -29,23 +30,36 @@ def check_dst(dst, safe):
             from os import remove
             remove(dst)
 
-def create_file(src_f, dst_nm, n, chunk_sz, remainder_sz):
-    '''return if nothing to read for src_f'''
-    with open(dst_nm, 'wb') as dst_f:
-        for _ in range(n):
+def write_file_in_memery_ctl(src_f, dst_f, bytes_to_read, chunk_sz):
+    while bytes_to_read>0:
+        if bytes_to_read>chunk_sz:
             chunk = src_f.read(chunk_sz)
-            dst_f.write(chunk)
-            if len(chunk)<chunk_sz:
-                return True
-        remainder = src_f.read(remainder_sz)
-        dst_f.write(remainder)
-        return True if len(remainder)<remainder_sz else False
+        else:
+            chunk = src_f.read(bytes_to_read)
+        dst_f.write(chunk)
+        yield
+        if len(chunk)<chunk_sz:  return  # when some source filesize is small, return instead still read 
+        bytes_to_read -= chunk_sz
+
+def print_percent(total, now):
+    if now >= total:
+        now = total
+    elif now < 0:
+        now = 0
+    now = (now*100) // total
+    n = '*'*(now*80//100)
+    line = '%d%% %s'%(now,n)
+    stdout.write(line.ljust(80) + '\r')
+    stdout.flush()
+    from time import sleep
+    sleep(1)
 
 def splitfile(src, dst, mem_sz=MEM_SZ, output_sz=OUTPUT_SZ, safe=True):
     if not exists(src):
         raise Exception(DONT_EXIST_ERROR)
     elif not isfile(src):
         raise Exception("Source is not a file.")
+    src_sz = getsize(src)
 
     try:
         mem_sz = parse_chunk_sz(mem_sz)
@@ -64,28 +78,33 @@ def splitfile(src, dst, mem_sz=MEM_SZ, output_sz=OUTPUT_SZ, safe=True):
 
     if mem_sz >= output_sz:
         mem_sz = output_sz
-        read_time_per_file = 1
-        remainder_sz = 0
-    else:
-        read_time_per_file = output_sz//mem_sz
-        remainder_sz = output_sz%mem_sz
+    
+    piece_amount = int(ceil(src_sz*1.0 / output_sz))  # file names will generate
+    read_times_per_piece = int(ceil(output_sz*1.0 / mem_sz))
+    read_times_total = piece_amount * read_times_per_piece
+
     check_dst(dst, safe)
 
     from os import makedirs
-    from os.path import join
-    file_name = 1
     makedirs(dst)
+    now_trunk = 1
+    file_type = src.rsplit('.', 1)[-1]
+    print_percent(read_times_total, 0)
     with open(src, 'rb') as src_f:
-        while True:
-            if create_file(
-                        src_f,
-                        join(dst, str(file_name)),
-                        read_time_per_file,
-                        mem_sz,
-                        remainder_sz,
-                    ):
-                break
-            file_name += 1
+        for piece_num in range(piece_amount):
+            dst_nm = join(dst, str(piece_num)) 
+            dst_nm = '.'.join([dst_nm, file_type])
+            with open(dst_nm, 'wb') as dst_f:
+                write_status = write_file_in_memery_ctl(
+                            src_f,
+                            dst_f,
+                            output_sz,
+                            mem_sz,
+                )
+                for i in write_status:
+                    print_percent(read_times_total, now_trunk)
+                    now_trunk += 1
+    print('\nFinished!')
 
 
 def combinefile(src, dst, mem_sz=MEM_SZ, safe=True):
@@ -95,23 +114,48 @@ def combinefile(src, dst, mem_sz=MEM_SZ, safe=True):
         raise Exception("Source is not a directory.")
 
     from os import listdir
-    files = listdir(src)
+    fnames = listdir(src)
+    file_type = fnames[0].rsplit('.', 1)[-1]
     try:
-        digit_fnames = set((int(i) for i in files))
-        for i in range(1, max(digit_fnames)+1): 
-            print i
+        digit_fnames = sorted([int(i.rsplit('.', 1)[0]) for i in fnames])
+        for i in range(len(digit_fnames)): 
+            if i not in digit_fnames:
+                raise Exception("")
     except:
-        raise Exception("file names in source directory aren't all integers")
+        raise Exception("File's name in source directory must be sequenced integers start from 1.")
 
     try:
         mem_sz = parse_chunk_sz(mem_sz)
     except:
         raise Exception(MEM_FORMAT_ERROR)
-    mem_sz -= 1024*1024*150
+    mem_sz -= 1024*1024*150  # except python progress memery usage
     if mem_sz<=0:
         raise Exception(MEM_SIZE_ERROR)
 
+    dst = '%s.%s'%(dst, file_type)
     check_dst(dst, safe)
+    
+    piece_amount = len(digit_fnames) 
+    first_file = join(src, '0.%s'%(file_type,))
+    read_times_per_piece = int(ceil(getsize(first_file)*1.0 / mem_sz))
+    read_times_total = piece_amount * read_times_per_piece
+
+    now_trunk = 0
+    print_percent(read_times_total, now_trunk)
+    with open(dst, 'wb') as dst_f:
+        for piece in digit_fnames:
+            src_nm = join(src, '%d.%s'%(piece, file_type))
+            with open(src_nm, 'rb') as src_f:
+                write_status = write_file_in_memery_ctl(
+                            src_f,
+                            dst_f,
+                            getsize(src_nm),
+                            mem_sz,
+                )
+                for i in write_status:
+                    print_percent(read_times_total, now_trunk)
+                    now_trunk += 1
+    print('\nFinished!')
 
 if __name__ == '__main__':
     import optparse
